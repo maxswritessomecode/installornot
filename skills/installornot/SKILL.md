@@ -30,10 +30,10 @@ a temp path or pass the text). The script does not fetch candidate URLs.
 From this skill directory (`scripts/` next to this file):
 
 ```bash
-python3 scripts/inventory.py --candidate-path <path-to-SKILL.md-or-dir-or-mcp.json>
-python3 scripts/inventory.py --candidate-text -        # paste on stdin
+python3 scripts/inventory.py --candidate-path <path>
+python3 scripts/inventory.py --candidate-text -
 python3 scripts/inventory.py --kind auto|skill|mcp|plugin
-python3 scripts/inventory.py --catalogs local|live|off   # default local
+python3 scripts/inventory.py --catalogs local|live|off
 ```
 
 Requires Python 3.11+. No pip packages. `--catalogs live` hits only the

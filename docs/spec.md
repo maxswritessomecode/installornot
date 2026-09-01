@@ -113,7 +113,7 @@ A plugin candidate also contributes its bundled skills (`skills/*/SKILL.md`, one
 
 Do not recursively scan `$HOME`. Only scan explicit roots and registry-resolved plugin paths.
 
-**Self-exclusion:** the installornot repository (parent of `skill/scripts/inventory.py`) and the installed `skill/` copy's own `SKILL.md` are excluded from comparison so the tool never reports a conflict with itself.
+**Self-exclusion:** the installornot repository (parent of `skills/installornot/scripts/inventory.py`, detected via `docs/spec.md`) and the installed skill directory that contains the running script are excluded from comparison so the tool never reports a conflict with itself.
 
 ### Skills
 
@@ -318,7 +318,7 @@ Incomplete catalog coverage must be stated. Never claim “nothing better exists
 
 ## Agent verdict protocol
 
-See `skill/SKILL.md`. Summary:
+See `skills/installornot/SKILL.md`. Summary:
 
 Overlap verdicts (exactly one per shortlisted item, including `no_conflict`):
 

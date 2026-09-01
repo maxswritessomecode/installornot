@@ -1,67 +1,84 @@
 # Installornot
 
-Pre-install checker for **Claude Code** and **Codex CLI**. Before you add a skill, MCP server, or plugin, it inventories what is already active, reports whether the candidate will run, whether it conflicts, and whether a better match is already installed or sitting in a scanned catalog.
+Before you install a skill, MCP, or plugin into **Claude Code** or **Codex**, check whether it will run, whether it conflicts with what you already have, and whether a better match is already sitting in a catalog.
 
-Report-only. It never installs, disables, or deletes anything. Python 3.11+ standard library only — no pip packages, no model downloads.
+Report-only. Python 3.11+, no pip packages.
 
-## Install (copy, do not symlink)
+## Install
 
-Symlinks break when the clone moves. Copy the `skill/` directory into the host skill root and rename it `installornot`:
-
-**Claude Code**
+One command. Copies into Claude Code and Codex (no symlinks):
 
 ```bash
-cp -R skill "$HOME/.claude/skills/installornot"
+npx skills add maxswritessomecode/installornot -g --copy -y
 ```
 
-If you use `CLAUDE_CONFIG_DIR`, copy into `"$CLAUDE_CONFIG_DIR/skills/installornot"` instead.
-
-**Codex CLI**
+No Node? Same result:
 
 ```bash
-cp -R skill "$HOME/.codex/skills/installornot"
+curl -fsSL https://raw.githubusercontent.com/maxswritessomecode/installornot/master/install.sh | bash
 ```
 
-If you use `CODEX_HOME`, copy into `"$CODEX_HOME/skills/installornot"` instead.
+Or tell the agent you already have:
 
-After copying, start a new session (or a new turn) so the host can see the skill.
+> Install the skill from https://github.com/maxswritessomecode/installornot
+
+Then start a new session (or a new turn).
+
+<details>
+<summary>Claude plugin, Codex skill-installer, manual copy</summary>
+
+Claude Code plugin:
+
+```bash
+claude plugin marketplace add maxswritessomecode/installornot
+claude plugin install installornot@installornot
+```
+
+Codex built-in installer (path basename is `installornot`):
+
+```text
+Install from github.com/maxswritessomecode/installornot path skills/installornot
+```
+
+Manual copy (`CLAUDE_CONFIG_DIR` / `CODEX_HOME` override the defaults):
+
+```bash
+cp -R skills/installornot "$HOME/.claude/skills/installornot"
+cp -R skills/installornot "$HOME/.codex/skills/installornot"
+```
+
+</details>
 
 ## Use
 
-Ask the agent to vet a candidate, or run the scanner yourself:
+Ask:
+
+> Vet this before I install it
+
+and pass a `SKILL.md`, a plugin directory, or an `mcp.json`. Or run the scanner:
 
 ```bash
-python3 skill/scripts/inventory.py --candidate-path ./path/to/SKILL.md
-python3 skill/scripts/inventory.py --candidate-path ./path/to/plugin-dir
-python3 skill/scripts/inventory.py --candidate-path ./mcp.json --kind mcp
-python3 skill/scripts/inventory.py --catalogs local   # default; on-disk marketplaces only
-python3 skill/scripts/inventory.py --catalogs live    # allowlisted HTTP catalogs
-python3 skill/scripts/inventory.py --catalogs off
+python3 skills/installornot/scripts/inventory.py --candidate-path ./path/to/SKILL.md
+python3 skills/installornot/scripts/inventory.py --candidate-path ./plugin-dir --kind plugin
+python3 skills/installornot/scripts/inventory.py --catalogs local   # default
 ```
 
-The script prints one JSON object. The skill (`SKILL.md`) tells the agent how to turn that into a recommendation.
-
-`--catalogs live` only requests:
-
-- `https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json`
-- `https://api.github.com/repos/openai/skills/contents/skills/.curated`
-
-Candidate URLs are not fetched by the script. If the thing you want to install is only on the network, fetch it first and pass a path or `--candidate-text -`.
+`--catalogs live` only requests the two allowlisted catalog URLs in the spec. The script does not fetch candidate URLs — fetch those first if needed.
 
 ## What it checks
 
-1. **What you have** — skills, MCPs, and plugins actually reachable by Claude Code or Codex, not a recursive home-directory glob of `SKILL.md` files.
-2. **Will it work / will it conflict** — command on `PATH`, declared env *names* present (values are never printed), frontmatter portability, name/description overlap.
+1. **What you have** — skills, MCPs, and plugins the running harness can actually see.
+2. **Will it work / will it conflict** — command on `PATH`, declared env *names* (never values), frontmatter portability, overlap.
 3. **Do you need it** — skip if something active already covers it; otherwise suggest a better match from scanned catalogs.
 
 ## Tests
 
 ```bash
-python3 -m unittest tests.test_inventory
+python3 -m unittest tests.test_inventory tests.test_install
 ```
 
-Tests build throwaway config trees. They do not read or write your real `~/.claude` or `~/.codex`.
+Tests use throwaway config trees. They do not touch your real `~/.claude` or `~/.codex`.
 
 ## Spec
 
-See [docs/spec.md](docs/spec.md).
+[docs/spec.md](docs/spec.md)

@@ -13,7 +13,7 @@ from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
 REPO = TESTS_DIR.parent
-SCRIPT = REPO / "skill" / "scripts" / "inventory.py"
+SCRIPT = REPO / "skills" / "installornot" / "scripts" / "inventory.py"
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(SCRIPT.parent))
 
@@ -233,7 +233,7 @@ class TestShortlist(IsolatedHome):
 
     def test_self_exclusion(self):
         # Point cwd at this repo; the tool must not shortlist its own SKILL.md as a conflict.
-        own = REPO / "skill" / "SKILL.md"
+        own = REPO / "skills" / "installornot" / "SKILL.md"
         if not own.exists():
             self.skipTest("SKILL.md not written yet")
         data = self.report("--candidate-path", str(own), "--cwd", str(REPO))
