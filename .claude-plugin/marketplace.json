@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "installornot",
+  "description": "Check a skill, MCP, or plugin before you install it",
+  "owner": {
+    "name": "Martin Shin"
+  },
+  "plugins": [
+    {
+      "name": "installornot",
+      "description": "Check a skill, MCP, or plugin before installing it: will it run, does it conflict, do you already have it.",
+      "source": "./",
+      "homepage": "https://github.com/maxswritessomecode/installornot"
+    }
+  ]
+}

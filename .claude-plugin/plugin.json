@@ -1,0 +1,8 @@
+{
+  "name": "installornot",
+  "description": "Before you install a skill, MCP, or plugin, check that it will actually run on this machine and that you do not already have the same thing.",
+  "author": {
+    "name": "Martin Shin"
+  },
+  "homepage": "https://github.com/maxswritessomecode/installornot"
+}

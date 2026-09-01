@@ -86,14 +86,16 @@ SELF_SKILL_DIR = SELF_SCRIPT.parent.parent  # directory that contains SKILL.md +
 
 
 def _development_repo() -> Path | None:
-    """Repo root when running from <repo>/skill/scripts/inventory.py, else None.
+    """Repo root when running from <repo>/skills/installornot/scripts/inventory.py.
 
     Must not treat ~/.claude/skills as a repo: that would exclude every personal skill.
     """
-    if SELF_SCRIPT.parent.name != "scripts" or SELF_SKILL_DIR.name != "skill":
+    if SELF_SCRIPT.parent.name != "scripts":
         return None
-    repo = SELF_SKILL_DIR.parent
-    if (repo / "docs" / "spec.md").is_file() or (SELF_SKILL_DIR / "SKILL.md").is_file():
+    if SELF_SKILL_DIR.parent.name != "skills":
+        return None
+    repo = SELF_SKILL_DIR.parent.parent
+    if (repo / "docs" / "spec.md").is_file():
         return repo
     return None
 

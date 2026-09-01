@@ -6,7 +6,7 @@ The Aug 18 design used `skill-vet`. The shipping product covers skills, MCPs, an
 
 ## 2026-08-31 — Copy install, never default to symlink
 
-29 of 37 entries in a real `~/.claude/skills/` were dangling symlinks after a target move. Public docs tell people to `cp -R skill …/installornot`. Symlink is a documented development option only.
+29 of 37 entries in a real `~/.claude/skills/` were dangling symlinks after a target move. Public install uses copy (`npx skills add … --copy` and `install.sh`), not symlink.
 
 ## 2026-08-31 — Stdlib only at runtime
 
@@ -18,7 +18,7 @@ No PyPI dependency for the scanner. Catalog live-fetch uses `urllib`. Tests use 
 
 ## 2026-08-31 — Self-exclusion must not wipe personal skills
 
-When the script is copied to `~/.claude/skills/installornot/scripts/inventory.py`, the parent of the skill dir is the personal skills root. Only exclude the development repo when the path is `<repo>/skill/scripts/inventory.py`. Always exclude the skill directory that contains this script.
+When the script is copied to `~/.claude/skills/installornot/scripts/inventory.py`, the parent of the skill dir is the personal skills root. Only exclude the development repo when the path is `<repo>/skills/installornot/scripts/inventory.py` (detected via sibling `docs/spec.md`). Always exclude the skill directory that contains this script.
 
 ## 2026-08-31 — Project discovery skips harness config dirs
 
@@ -27,3 +27,7 @@ Walking ancestors for `.claude/skills` from a cwd under `$HOME` would otherwise 
 ## 2026-08-31 — Cursor adapter deferred
 
 Discovery is split into Claude and Codex adapters so a Cursor adapter can be added later without changing the verdict protocol.
+
+## 2026-09-01 — One-command install, standard `skills/` layout
+
+`npx skills add` only discovers `skills/<name>/SKILL.md` (or repo-root `SKILL.md`). The old `skill/` directory was invisible to that CLI. Moved the payload to `skills/installornot/` and added `install.sh` plus a Claude marketplace manifest. Public install prefers `npx skills add … -g --copy -y` or `curl …/install.sh | bash`. `--copy` stays the default so we do not recreate the dangling-symlink failure mode.

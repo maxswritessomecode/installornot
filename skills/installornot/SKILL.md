@@ -1,12 +1,11 @@
 ---
 name: installornot
 description: >-
-  Pre-install check for Claude Code and Codex CLI skills, MCP servers, and
-  plugins. Inventories what is already active, reports whether a candidate will
-  run and whether it conflicts, and suggests better matches already installed
-  or in scanned catalogs. Use when the user wants to install a skill, MCP, or
-  plugin, asks if something will conflict, or asks whether they already have an
-  equivalent.
+  Checks a skill, MCP, or plugin against what Claude Code or Codex already
+  has installed. Reports whether it will run (binary on PATH, env names
+  present), whether it conflicts, and whether something already covers the
+  job. Use when the user wants to install something, asks "will this work",
+  asks if it conflicts, or asks if they already have an equivalent.
 ---
 
 # Installornot
@@ -18,6 +17,7 @@ skill is report-only.
 ## When this applies
 
 - "Install this skill / MCP / plugin"
+- "Will this work?" / "Will this MCP run?" / "Is the binary on PATH?"
 - "Will this conflict with what I have?"
 - "Do I already have something that does this?"
 - A GitHub URL, local `SKILL.md`, `plugin.json`, or `mcp.json` is the candidate
@@ -30,10 +30,10 @@ a temp path or pass the text). The script does not fetch candidate URLs.
 From this skill directory (`scripts/` next to this file):
 
 ```bash
-python3 scripts/inventory.py --candidate-path <path-to-SKILL.md-or-dir-or-mcp.json>
-python3 scripts/inventory.py --candidate-text -        # paste on stdin
+python3 scripts/inventory.py --candidate-path <path>
+python3 scripts/inventory.py --candidate-text -
 python3 scripts/inventory.py --kind auto|skill|mcp|plugin
-python3 scripts/inventory.py --catalogs local|live|off   # default local
+python3 scripts/inventory.py --catalogs local|live|off
 ```
 
 Requires Python 3.11+. No pip packages. `--catalogs live` hits only the
@@ -42,6 +42,9 @@ clones already on disk.
 
 If the JSON `scan_errors` or `inventory_health` is non-empty, say so in
 **Coverage**. Never claim a complete scan when those fields show gaps.
+
+If they asked whether it will work, say `compatibility.status` first
+(`works` / `needs_config` / `wont_work`). Do not bury that under overlap.
 
 ## Step 2 — Untrusted data
 
