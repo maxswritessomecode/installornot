@@ -68,5 +68,7 @@ if [ -n "$CLEANUP" ]; then
 fi
 
 echo
-echo "Done. Start a new Claude Code or Codex session (or a new turn) so the skill loads."
-echo "Then: \"vet this skill/plugin/MCP before I install it\" and pass a path."
+echo "Done. New Claude Code or Codex session (or a new turn) so it loads."
+echo "Then check a candidate:"
+echo "  python3 ${CLAUDE_DIR}/skills/${SKILL_NAME}/scripts/inventory.py --candidate-path ./SKILL.md"
+echo "  python3 ${CLAUDE_DIR}/skills/${SKILL_NAME}/scripts/inventory.py --candidate-path ./mcp.json"

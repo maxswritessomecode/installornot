@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "installornot",
-  "description": "Pre-install checker for skills, MCP servers, and plugins",
+  "description": "Check a skill, MCP, or plugin before you install it",
   "owner": {
     "name": "Martin Shin"
   },
   "plugins": [
     {
       "name": "installornot",
-      "description": "Before installing a skill, MCP, or plugin, check whether it will run, whether it conflicts, and whether you already have something better.",
+      "description": "Check a skill, MCP, or plugin before installing it: will it run, does it conflict, do you already have it.",
       "source": "./",
       "homepage": "https://github.com/maxswritessomecode/installornot"
     }

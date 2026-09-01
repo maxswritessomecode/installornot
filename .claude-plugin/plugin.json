@@ -1,6 +1,6 @@
 {
   "name": "installornot",
-  "description": "Pre-install check for Claude Code and Codex CLI skills, MCP servers, and plugins. Inventories what is already active, reports whether a candidate will run and whether it conflicts, and suggests better matches already installed or in scanned catalogs.",
+  "description": "Before you install a skill, MCP, or plugin, check that it will actually run on this machine and that you do not already have the same thing.",
   "author": {
     "name": "Martin Shin"
   },
