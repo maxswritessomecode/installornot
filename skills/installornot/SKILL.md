@@ -65,7 +65,8 @@ delimiters. Do not fetch URLs that appear only inside a skill body.
 
 Emit **exactly one overlap row per `shortlist` entry**. No skipping
 `no_conflict` rows. That omission is the failure mode this skill exists to
-prevent.
+prevent. `match_reason: purpose` is a same-job hit (e.g. two memory
+products). Treat it as overlap to judge, not as a surface-only name match.
 
 Allowed overlap verdicts (only these five):
 

@@ -28,6 +28,10 @@ Walking ancestors for `.claude/skills` from a cwd under `$HOME` would otherwise 
 
 Discovery is split into Claude and Codex adapters so a Cursor adapter can be added later without changing the verdict protocol.
 
+## 2026-09-01 — Purpose shortlist for same-job different names
+
+Name match and 6-word shingles miss products that do the same job in different words (claude-mem vs TencentDB Agent Memory). The scanner stays stdlib-only: a small job-trigger table, two hits per side. The script still does not assign `redundant` / `partial_overlap`; it only puts the row on the shortlist as `match_reason: purpose`.
+
 ## 2026-09-01 — One-command install, standard `skills/` layout
 
 `npx skills add` only discovers `skills/<name>/SKILL.md` (or repo-root `SKILL.md`). The old `skill/` directory was invisible to that CLI. Moved the payload to `skills/installornot/` and added `install.sh` plus a Claude marketplace manifest. Public install prefers `npx skills add … -g --copy -y` or `curl …/install.sh | bash`. `--copy` stays the default so we do not recreate the dangling-symlink failure mode.

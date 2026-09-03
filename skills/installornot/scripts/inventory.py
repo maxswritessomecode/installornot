@@ -239,6 +239,80 @@ def description_shingles(a: str, b: str) -> int:
     return len(grams(ta) & grams(tb))
 
 
+# Job tags: both sides need >= PURPOSE_HIT_FLOOR triggers from the same job.
+# Catches purpose overlap when names and 6-word shingles do not (claude-mem vs TencentDB).
+PURPOSE_HIT_FLOOR = 2
+JOB_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "agent_memory": (
+        "memory",
+        "memories",
+        "recall",
+        "persist",
+        "persistent",
+        "cross session",
+        "auto capture",
+        "auto captures",
+        "captures",
+        "claude-mem",
+        "claude mem",
+        "tencentdb",
+        "tdai",
+        "mem0",
+        "长期记忆",
+        "召回",
+    ),
+    "skill_authoring": (
+        "creating skills",
+        "create a skill",
+        "create new skills",
+        "writing skills",
+        "editing existing skills",
+        "skill creator",
+        "create skill",
+    ),
+    "frontend_ui": (
+        "frontend",
+        "visual design",
+        "typography",
+        "landing pages",
+        "user interface",
+    ),
+}
+
+
+def _phrase_in(blob: str, phrase: str) -> bool:
+    if not phrase:
+        return False
+    if f" {phrase} " in f" {blob} ":
+        return True
+    if any(ord(ch) > 127 for ch in phrase):
+        return phrase in blob
+    return False
+
+
+def count_job_triggers(text: str, triggers: tuple[str, ...]) -> int:
+    blob = normalize_description(text)
+    seen: set[str] = set()
+    hits = 0
+    for raw in triggers:
+        phrase = normalize_description(raw)
+        if not phrase or phrase in seen:
+            continue
+        seen.add(phrase)
+        if _phrase_in(blob, phrase):
+            hits += 1
+    return hits
+
+
+def shared_purpose_job(left: str, right: str) -> str | None:
+    for job, triggers in JOB_TRIGGERS.items():
+        if count_job_triggers(left, triggers) >= PURPOSE_HIT_FLOOR and count_job_triggers(
+            right, triggers
+        ) >= PURPOSE_HIT_FLOOR:
+            return job
+    return None
+
+
 def parse_version_dir(name: str) -> tuple[str, Any, bool]:
     m = VERSION_RE.match(name)
     if m:
@@ -416,8 +490,10 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
         best_reason = None
         best_shingles = 0
         best_rank = 99
+        best_job = None
         iname = item.get("name") or ""
         idesc = item.get("description") or ""
+        item_blob = f"{iname} {idesc}"
         for pname, pdesc in probes:
             if pname and iname and pname.casefold() == iname.casefold():
                 best_reason, best_rank, best_shingles = "exact_name", 0, 0
@@ -431,6 +507,10 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
                     best_reason, best_rank, best_shingles = "shingle", 2, n
                 elif n > best_shingles and best_reason == "shingle":
                     best_shingles = n
+            if best_rank > 3:
+                job = shared_purpose_job(f"{pname} {pdesc}", item_blob)
+                if job:
+                    best_reason, best_rank, best_job = "purpose", 3, job
         if best_reason:
             key = _identity_key(item)
             if key in seen:
@@ -444,6 +524,7 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
                 "display_path": item.get("display_path"),
                 "match_reason": best_reason,
                 "shingle_count": best_shingles if best_reason == "shingle" else 0,
+                "purpose_job": best_job if best_reason == "purpose" else None,
             }))
     ranked.sort(key=lambda t: (t[0], t[1], t[2].get("name") or ""))
     total = len(ranked)

@@ -477,6 +477,80 @@ class TestKindAndCli(IsolatedHome):
         self.assertNotIn("SECRET_OUTSIDE", blob)
 
 
+class TestPurposeShortlist(IsolatedHome):
+    def test_memory_products_different_names_shortlist(self):
+        """claude-mem vs TencentDB: same job, no shared name or 6-word phrase."""
+        harness.add_personal_skill(
+            self.claude,
+            "claude-mem",
+            "Persistent memory system for Claude Code - seamlessly preserve context across sessions",
+        )
+        cand = harness.write(
+            self.home / "cand" / "SKILL.md",
+            harness.skill_md(
+                "tdai-memory",
+                "Four-layer memory system — auto-captures, structures, and profiles conversational knowledge",
+            ),
+        )
+        data = self.report("--candidate-path", str(cand))
+        hits = [row for row in data["shortlist"] if row["name"] == "claude-mem"]
+        self.assertEqual(len(hits), 1, data["shortlist"])
+        self.assertEqual(hits[0]["match_reason"], "purpose")
+        self.assertEqual(hits[0]["purpose_job"], "agent_memory")
+
+    def test_same_trigger_spelled_two_ways_counts_once(self):
+        """'claude-mem' and 'claude mem' are one hit, not two."""
+        harness.add_personal_skill(
+            self.claude,
+            "knowledge-agent",
+            "Build and query knowledge bases from claude-mem observations and history",
+        )
+        cand = harness.write(
+            self.home / "cand" / "SKILL.md",
+            harness.skill_md(
+                "tdai-memory",
+                "Four-layer memory system — auto-captures, structures, and profiles conversational knowledge",
+            ),
+        )
+        data = self.report("--candidate-path", str(cand))
+        names = [row["name"] for row in data["shortlist"]]
+        self.assertNotIn("knowledge-agent", names)
+
+    def test_single_memory_word_is_not_a_purpose_hit(self):
+        harness.add_personal_skill(
+            self.claude,
+            "cache-debug",
+            "Debug a memory leak in the Next.js runtime cache",
+        )
+        cand = harness.write(
+            self.home / "cand" / "SKILL.md",
+            harness.skill_md(
+                "tdai-memory",
+                "Four-layer memory system — auto-captures, structures, and profiles conversational knowledge",
+            ),
+        )
+        data = self.report("--candidate-path", str(cand))
+        names = [row["name"] for row in data["shortlist"]]
+        self.assertNotIn("cache-debug", names)
+
+    def test_exact_name_outranks_purpose(self):
+        harness.add_personal_skill(
+            self.claude,
+            "tdai-memory",
+            "Persistent memory system for Claude Code - seamlessly preserve context across sessions",
+        )
+        cand = harness.write(
+            self.home / "cand" / "SKILL.md",
+            harness.skill_md(
+                "tdai-memory",
+                "Four-layer memory system — auto-captures, structures, and profiles conversational knowledge",
+            ),
+        )
+        data = self.report("--candidate-path", str(cand))
+        hits = [row for row in data["shortlist"] if row["name"] == "tdai-memory"]
+        self.assertEqual(hits[0]["match_reason"], "exact_name")
+
+
 class TestContract(IsolatedHome):
     def test_json_schema_keys(self):
         cand = harness.write(

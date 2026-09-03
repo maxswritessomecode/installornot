@@ -209,7 +209,8 @@ Against active inventory of all kinds (cross-kind). Cap 25.
 1. Exact name match (case-insensitive). Always included; does **not** decide the verdict.
 2. Normalized exact-description match (Unicode normalize, case-fold, strip punctuation/whitespace).
 3. Adaptive verbatim shingles on the description. Six words when both have ≥6 tokens; else length of the shorter, minimum 2. One-word descriptions skip shingles.
-4. Rank: exact name, then exact description, then shingle count descending.
+4. Purpose job. Name+description on each side must hit **two or more** triggers from the same job in `JOB_TRIGGERS` (`agent_memory`, `skill_authoring`, `frontend_ui`). `match_reason: purpose` and `purpose_job: <job>`. This is how claude-mem vs TencentDB Agent Memory shortlists without a shared name or copied sentence. One shared word (e.g. “memory leak”) is not enough.
+5. Rank: exact name, then exact description, then shingle count descending, then purpose.
 
 Plugin candidates: also shortlist using bundled skill/MCP names and descriptions.
 
@@ -293,8 +294,9 @@ Incomplete catalog coverage must be stated. Never claim “nothing better exists
       "description": "...",
       "source_type": "...",
       "display_path": "$HOME/...",
-      "match_reason": "exact_name|exact_description|shingle",
-      "shingle_count": 0
+      "match_reason": "exact_name|exact_description|shingle|purpose",
+      "shingle_count": 0,
+      "purpose_job": "agent_memory|skill_authoring|frontend_ui|null"
     }
   ],
   "shortlist_metadata": { "total_matches": 0, "included_matches": 0, "truncated": false },
