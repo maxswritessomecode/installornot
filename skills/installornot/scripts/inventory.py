@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tomllib
 import unicodedata
@@ -22,9 +23,9 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-INSTALLORNOT_VERSION = "0.1.0"
+INSTALLORNOT_VERSION = "0.2.0"
 SCHEMA_VERSION = 1
-COMPATIBILITY_RULES_DATE = "2026-08-31"
+COMPATIBILITY_RULES_DATE = "2026-10-11"
 SHORTLIST_CAP = 25
 MAX_CANDIDATE_TEXT = 512 * 1024
 PACKAGE_MAX_FILES = 500
@@ -80,6 +81,22 @@ SUSPICIOUS_PATTERNS = [
     (re.compile(r"rm\s+-rf", re.I), "destructive_shell"),
     (re.compile(r"\$\([^)]+\)"), "shell_substitution"),
 ]
+
+# Actions a candidate asks the agent/user to perform that deserve a human look.
+# Labels only; never proof of malice. Separate from prompt-injection patterns above.
+RISKY_ACTIONS = [
+    (re.compile(r"\bgit\s+push\b", re.I), "git_push"),
+    (re.compile(r"\bgit\s+commit\b", re.I), "git_commit"),
+    (re.compile(r"\bosascript\b", re.I), "osascript"),
+    (re.compile(r"\bsudo\b"), "sudo"),
+    (re.compile(r"\blaunchctl\b|\bcrontab\b", re.I), "scheduler"),
+    (re.compile(r"\bdefaults\s+write\b", re.I), "defaults_write"),
+    (re.compile(r"\.claude/(CLAUDE\.md|settings(\.local)?\.json)|~/\.claude/", re.I), "edits_agent_config"),
+    (re.compile(r"\bnpm\s+(i|install)\s+-g\b|\bpip3?\s+install\b|\bbrew\s+install\b", re.I), "package_install"),
+]
+TEXT_SUFFIXES = {
+    ".md", ".json", ".py", ".sh", ".js", ".mjs", ".ts", ".toml", ".yaml", ".yml", ".txt", ".html",
+}
 
 SELF_SCRIPT = Path(__file__).resolve()
 SELF_SKILL_DIR = SELF_SCRIPT.parent.parent  # directory that contains SKILL.md + scripts/
@@ -137,6 +154,7 @@ class Config:
     catalogs: str = "local"
     show_absolute: bool = False
     kind: str = "auto"
+    hooks: list = field(default_factory=list)  # filled during discovery: {event, owner, source_type, commands}
 
 
 @dataclass
@@ -180,7 +198,23 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _finalize_scalar(first: str, cont: list[str]) -> str:
+    """Collapse a frontmatter value. Folded/literal block scalars (>, >-, |, |-) and
+    quoted strings are reduced to plain text; nested blocks (e.g. metadata:) stay raw."""
+    first = first.strip()
+    lines = [c.strip() for c in cont if c.strip()]
+    if re.fullmatch(r"[>|][+-]?", first):
+        return " ".join(lines)
+    if not first and lines:
+        return "\n".join(cont)
+    value = first if not lines else " ".join([first, *lines])
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    return value
+
+
 def parse_frontmatter(text: str) -> dict[str, Any]:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     result: dict[str, Any] = {"keys": {}, "key_order": [], "body": text, "error": None}
     if not text.startswith("---"):
         result["error"] = "no_frontmatter"
@@ -197,19 +231,22 @@ def parse_frontmatter(text: str) -> dict[str, Any]:
     if body.startswith("\n"):
         body = body[1:]
     result["body"] = body
+    raw: dict[str, tuple[str, list[str]]] = {}
     current_key = None
     for line in block.splitlines():
         if line.startswith(" ") or line.startswith("\t"):
             if current_key:
-                result["keys"][current_key] = str(result["keys"][current_key]) + "\n" + line
+                raw[current_key][1].append(line)
             continue
         m = FM_KEY_RE.match(line)
         if m:
             current_key = m.group(1)
-            result["keys"][current_key] = m.group(2).strip()
+            raw[current_key] = (m.group(2), [])
             result["key_order"].append(current_key)
         else:
             current_key = None
+    for key, (first, cont) in raw.items():
+        result["keys"][key] = _finalize_scalar(first, cont)
     return result
 
 
@@ -240,44 +277,81 @@ def description_shingles(a: str, b: str) -> int:
 
 
 # Job tags: both sides need >= PURPOSE_HIT_FLOOR triggers from the same job.
-# Catches purpose overlap when names and 6-word shingles do not (claude-mem vs TencentDB).
+# Catches purpose overlap when names and 6-word shingles do not (e.g. two memory products,
+# or a "close the session" skill vs a session-memory plugin). Add jobs here; keep phrases
+# generic (what the thing does), never product names.
 PURPOSE_HIT_FLOOR = 2
 JOB_TRIGGERS: dict[str, tuple[str, ...]] = {
     "agent_memory": (
-        "memory",
-        "memories",
-        "recall",
-        "persist",
-        "persistent",
-        "cross session",
-        "auto capture",
-        "auto captures",
-        "captures",
-        "claude-mem",
-        "claude mem",
-        "tencentdb",
-        "tdai",
-        "mem0",
-        "长期记忆",
-        "召回",
+        "memory", "memories", "recall", "persist", "persistent", "cross session",
+        "next session", "previous sessions", "past sessions", "session history",
+        "remember", "handoff", "hand off", "auto capture", "auto captures", "captures",
+        "claude-mem", "claude mem", "tencentdb", "tdai", "mem0",
+        "长期记忆", "召回",
     ),
     "skill_authoring": (
-        "creating skills",
-        "create a skill",
-        "create new skills",
-        "writing skills",
-        "editing existing skills",
-        "skill creator",
-        "create skill",
+        "creating skills", "create a skill", "create new skills", "writing skills",
+        "editing existing skills", "skill creator", "create skill", "package a skill",
     ),
     "frontend_ui": (
-        "frontend",
-        "visual design",
-        "typography",
-        "landing pages",
-        "user interface",
+        "frontend", "visual design", "typography", "landing pages", "user interface",
+        "ui design", "design system",
+    ),
+    "git_publish": (
+        "git push", "push to github", "pull request", "pull requests", "commit", "github",
+        "release notes", "publish a repo",
+    ),
+    "browser_automation": (
+        "browser", "chrome", "screenshot", "screenshots", "playwright", "puppeteer",
+        "web pages", "click", "navigate",
+    ),
+    "web_research": (
+        "web search", "search the web", "research", "crawl", "extract content", "citations",
+        "scrape", "sources",
+    ),
+    "office_docs": (
+        "pdf", "docx", "pptx", "xlsx", "spreadsheet", "word document", "powerpoint",
+        "slide deck", "presentation",
+    ),
+    "deployment": ("deploy", "deployment", "deployments", "production", "preview", "rollback"),
+    "code_review": (
+        "code review", "review the diff", "review changes", "security review", "pull request review",
+    ),
+    "planning": (
+        "implementation plan", "write a plan", "brainstorm", "design spec", "execute a plan",
+    ),
+    "prompt_writing": (
+        "write a prompt", "prompt engineering", "improve a prompt", "grade a prompt", "system prompt",
     ),
 }
+
+# Generic words that say nothing about purpose. Used only by the text-similarity ranker.
+SIMILARITY_STOPWORDS = frozenset(
+    """a about after all also an and any are as at be been before but by can claude code
+    do does each for from get has have how if in into is it its just like make makes may more
+    most need needs not of on one only or other out over per skill skills so some such task
+    tasks than that the their them then there these they this those to up use used user users
+    uses using via want wants was we what when where which while who will with without you your
+    asks ask anything anyone tool tools help helps new""".split()
+)
+SIMILARITY_MIN_SHARED = 4
+SIMILARITY_MIN_JACCARD = 0.20
+
+
+def content_tokens(text: str) -> set[str]:
+    return {
+        t for t in tokenize(text)
+        if len(t) > 2 and t not in SIMILARITY_STOPWORDS and not t.isdigit()
+    }
+
+
+def description_similarity(a: str, b: str) -> tuple[int, float]:
+    """(shared content tokens, Jaccard). Deterministic stand-in for 'same job, other words'."""
+    ta, tb = content_tokens(a), content_tokens(b)
+    if not ta or not tb:
+        return 0, 0.0
+    shared = len(ta & tb)
+    return shared, shared / len(ta | tb)
 
 
 def _phrase_in(blob: str, phrase: str) -> bool:
@@ -356,8 +430,101 @@ def referenced_urls(text: str) -> list[str]:
     return re.findall(r"https?://[^\s)>\"]+", text or "")
 
 
+def uniq_cap(values: list[str], cap: int = 50) -> list[str]:
+    seen: list[str] = []
+    for v in values:
+        if v not in seen:
+            seen.append(v)
+        if len(seen) >= cap:
+            break
+    return seen
+
+
 def shell_install(text: str) -> bool:
     return bool(re.search(r"curl\s+\S+\s*\|\s*(ba)?sh", text or "", re.I))
+
+
+def inspect_risky(text: str) -> list[str]:
+    found: list[str] = []
+    for rx, label in RISKY_ACTIONS:
+        if rx.search(text or "") and label not in found:
+            found.append(label)
+    return found
+
+
+def _hook_commands(groups: Any) -> list[str]:
+    cmds: list[str] = []
+    if not isinstance(groups, list):
+        return cmds
+    for group in groups:
+        inner = group.get("hooks") if isinstance(group, dict) else None
+        for h in inner or []:
+            if isinstance(h, dict) and h.get("command"):
+                first = str(h["command"]).strip().splitlines()[0]
+                cmds.append(first[:80])
+    return cmds
+
+
+def hooks_from_obj(obj: Any) -> dict[str, list[str]]:
+    """{event: [command preview]} from a hooks.json or a settings.json 'hooks' value."""
+    if not isinstance(obj, dict):
+        return {}
+    events = obj.get("hooks") if isinstance(obj.get("hooks"), dict) else obj
+    out: dict[str, list[str]] = {}
+    for event, groups in events.items():
+        if isinstance(groups, list):
+            out[str(event)] = _hook_commands(groups)
+    return out
+
+
+def plugin_hooks(install_path: Path, manifest: dict[str, Any] | None) -> dict[str, list[str]]:
+    hooks: dict[str, list[str]] = {}
+    hf = install_path / "hooks" / "hooks.json"
+    if hf.is_file():
+        try:
+            hooks.update(hooks_from_obj(json.loads(hf.read_text(encoding="utf-8"))))
+        except (OSError, json.JSONDecodeError):
+            pass
+    inline = (manifest or {}).get("hooks")
+    if isinstance(inline, dict):
+        hooks.update(hooks_from_obj(inline))
+    return hooks
+
+
+def plugin_mcp_servers(install_path: Path, manifest: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    servers: dict[str, dict[str, Any]] = {}
+    for rel in (".mcp.json", "mcp.json"):
+        f = install_path / rel
+        if f.is_file():
+            try:
+                obj = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(obj, dict):
+                block = obj.get("mcpServers") if isinstance(obj.get("mcpServers"), dict) else obj
+                servers.update({k: v for k, v in block.items() if isinstance(v, dict)})
+    inline = (manifest or {}).get("mcpServers")
+    if isinstance(inline, dict):
+        servers.update({k: v for k, v in inline.items() if isinstance(v, dict)})
+    return servers
+
+
+def markdown_entries(directory: Path) -> list[tuple[str, str, Path]]:
+    """(name, description, path) for each *.md directly under a commands/ or agents/ dir."""
+    out: list[tuple[str, str, Path]] = []
+    if not directory.is_dir():
+        return out
+    try:
+        files = sorted(directory.glob("*.md"))
+    except OSError:
+        return out
+    for f in files:
+        try:
+            parsed = parse_frontmatter(f.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        out.append((str(parsed["keys"].get("name") or f.stem), str(parsed["keys"].get("description") or ""), f))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +658,7 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
         best_shingles = 0
         best_rank = 99
         best_job = None
+        best_sim = 0.0
         iname = item.get("name") or ""
         idesc = item.get("description") or ""
         item_blob = f"{iname} {idesc}"
@@ -511,6 +679,11 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
                 job = shared_purpose_job(f"{pname} {pdesc}", item_blob)
                 if job:
                     best_reason, best_rank, best_job = "purpose", 3, job
+            if best_rank > 4 and pdesc and idesc:
+                shared, jac = description_similarity(pdesc, idesc)
+                if shared >= SIMILARITY_MIN_SHARED and jac >= SIMILARITY_MIN_JACCARD:
+                    best_reason, best_rank, best_sim = "similar_text", 4, round(jac, 3)
+                    best_shingles = int(jac * 1000)
         if best_reason:
             key = _identity_key(item)
             if key in seen:
@@ -525,6 +698,7 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
                 "match_reason": best_reason,
                 "shingle_count": best_shingles if best_reason == "shingle" else 0,
                 "purpose_job": best_job if best_reason == "purpose" else None,
+                "similarity": best_sim if best_reason == "similar_text" else None,
             }))
     ranked.sort(key=lambda t: (t[0], t[1], t[2].get("name") or ""))
     total = len(ranked)
@@ -542,6 +716,7 @@ def shortlist(candidate: dict[str, Any], inventory: list[dict[str, Any]], cap: i
 
 def inspect_package(directory: Path) -> dict[str, Any]:
     executables: list[str] = []
+    text_parts: list[str] = []
     skipped = 0
     truncated = False
     files_seen = 0
@@ -591,11 +766,18 @@ def inspect_package(directory: Path) -> dict[str, Any]:
                 continue
             if os.access(child, os.X_OK) and child.is_file():
                 executables.append(child.name)
+            if child.suffix.lower() in TEXT_SUFFIXES and child.is_file():
+                try:
+                    text_parts.append(child.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    skipped += 1
     return {
         "executables": sorted(set(executables)),
         "skipped_files": skipped,
         "truncated": truncated,
         "adjacent_inspection": "inspected",
+        # Static text only (never executed). Callers pop this before it reaches the report.
+        "text": "\n".join(text_parts),
     }
 
 
@@ -693,12 +875,74 @@ def plugin_item(
     }
 
 
+def md_item(
+    kind: str,
+    name: str,
+    description: str,
+    path: Path,
+    *,
+    source_type: str,
+    cfg: Config,
+) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    shown = display_path(path, cfg.home, absolute=cfg.show_absolute)
+    return {
+        "kind": kind,
+        "name": name,
+        "description": description,
+        "source_type": source_type,
+        "display_path": shown,
+        "content_sha256": sha256_text(text),
+        "sources": [shown],
+        "frontmatter_keys": [],
+        "_real": str(path),
+    }
+
+
+def register_hooks(cfg: Config, owner: str, source_type: str, hooks: dict[str, list[str]]) -> None:
+    for event, cmds in hooks.items():
+        cfg.hooks.append({"event": event, "owner": owner, "source_type": source_type, "commands": cmds})
+
+
+def add_plugin_extras(
+    cfg: Config,
+    items: list[dict[str, Any]],
+    pname: str,
+    install_path: Path,
+    manifest: dict[str, Any] | None,
+    *,
+    with_hooks: bool,
+) -> None:
+    """Plugin-bundled MCP servers, slash commands, agents, and (Claude only) hooks."""
+    origin = install_path
+    for sname, entry in plugin_mcp_servers(install_path, manifest).items():
+        env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
+        items.append(
+            mcp_item(
+                sname, entry.get("command"), entry.get("url"), list(env.keys()),
+                source_type="plugin", origin=origin, cfg=cfg,
+            )
+        )
+    for kind, sub in (("command", "commands"), ("agent", "agents")):
+        for name, desc, f in markdown_entries(install_path / sub):
+            items.append(md_item(kind, f"{pname}:{name}", desc, f, source_type="plugin", cfg=cfg))
+    if with_hooks:
+        register_hooks(cfg, pname, "plugin", plugin_hooks(install_path, manifest))
+
+
 def dedupe_inventory(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_real: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for item in items:
-        key = item.get("_real") or (item["kind"], item["name"], item["content_sha256"])
-        key_s = str(key)
+        # Identical (kind, name, content) is one comparison target even when it is
+        # copied into several roots (~/.claude, ~/.codex, ~/.agents). Same name with
+        # different content stays separate.
+        key_s = f'{item["kind"]}|{item["name"]}|{item["content_sha256"]}'
+        if item["kind"] == "mcp":
+            key_s += f'|{item.get("_real")}'  # same server defined in two config files is two entries
         if key_s in by_real:
             existing = by_real[key_s]
             for src in item.get("sources") or []:
@@ -797,6 +1041,94 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def settings_layers(cfg: Config) -> list[tuple[Path, str]]:
+    """Settings files in precedence order, lowest first: user, user-local, then each project
+    ancestor from the repo root down to cwd."""
+    layers: list[tuple[Path, str]] = []
+    for name in ("settings.json", "settings.local.json"):
+        f = cfg.claude_dir / name
+        if f.is_file():
+            layers.append((f, "user" if name == "settings.json" else "user-local"))
+    chain: list[Path] = []
+    cur = cfg.cwd.resolve()
+    while True:
+        chain.append(cur)
+        if (cur / ".git").exists() or cur.parent == cur:
+            break
+        cur = cur.parent
+    try:
+        user_claude = cfg.claude_dir.resolve()
+    except OSError:
+        user_claude = cfg.claude_dir
+    for d in reversed(chain):
+        for name in ("settings.json", "settings.local.json"):
+            f = d / ".claude" / name
+            try:
+                if f.is_file() and f.parent.resolve() != user_claude:
+                    layers.append((f, "project" if name == "settings.json" else "project-local"))
+            except OSError:
+                continue
+    return layers
+
+
+def claude_json_mcps(cfg: Config, scan_errors: list[dict[str, str]], roots: list[str]) -> list[dict[str, Any]]:
+    """MCP servers from Claude Code's own state file (`claude mcp add`): user scope plus
+    per-project servers for cwd and its ancestors. Only server names, commands, urls and env
+    NAMES are read; nothing else in that file is looked at."""
+    candidates = []
+    if cfg.claude_dir != cfg.home / ".claude":
+        candidates.append(cfg.claude_dir / ".claude.json")
+    candidates.append(cfg.home / ".claude.json")
+    path = next((c for c in candidates if c.is_file()), None)
+    if path is None:
+        return []
+    shown = display_path(path, cfg.home, absolute=cfg.show_absolute)
+    try:
+        obj = load_json(path)
+    except (OSError, json.JSONDecodeError) as exc:
+        scan_errors.append({"root": shown, "code": "malformed", "message": str(exc.__class__.__name__)})
+        return []
+    if not isinstance(obj, dict):
+        return []
+    roots.append(shown)
+    out: list[dict[str, Any]] = []
+
+    def add(servers: Any, source_type: str) -> None:
+        if not isinstance(servers, dict):
+            return
+        for name, entry in servers.items():
+            if not isinstance(entry, dict):
+                continue
+            env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
+            out.append(
+                mcp_item(
+                    name, entry.get("command"), entry.get("url"), list(env.keys()),
+                    source_type=source_type, origin=path, cfg=cfg,
+                )
+            )
+
+    add(obj.get("mcpServers"), "personal")
+    projects = obj.get("projects") if isinstance(obj.get("projects"), dict) else {}
+    cur = cfg.cwd.resolve()
+    while True:
+        proj = projects.get(str(cur))
+        if isinstance(proj, dict):
+            add(proj.get("mcpServers"), "project")
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    return out
+
+
+def discover_agents_dir(cfg: Config, health: Health, scan_errors: list[dict[str, str]], roots: list[str]) -> list[dict[str, Any]]:
+    """~/.agents/skills: the cross-tool skills dir that install.sh and `npx skills` write to."""
+    root = cfg.home / ".agents" / "skills"
+    if not root.is_dir():
+        return []
+    roots.append(display_path(root, cfg.home, absolute=cfg.show_absolute))
+    return walk_skill_dir(root, "personal", cfg, health, scan_errors)
+
+
 def discover_claude(cfg: Config, health: Health, scan_errors: list[dict[str, str]], roots: list[str]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     skills_root = cfg.claude_dir / "skills"
@@ -833,15 +1165,22 @@ def discover_claude(cfg: Config, health: Health, scan_errors: list[dict[str, str
                     )
                 )
 
+    items.extend(claude_json_mcps(cfg, scan_errors, roots))
+    for kind, sub in (("command", "commands"), ("agent", "agents")):
+        for name, desc, f in markdown_entries(cfg.claude_dir / sub):
+            items.append(md_item(kind, name, desc, f, source_type="personal", cfg=cfg))
+
     enabled_map: dict[str, Any] = {}
-    settings_path = cfg.claude_dir / "settings.json"
-    if settings_path.is_file():
+    for settings_path, label in settings_layers(cfg):
         try:
             settings = load_json(settings_path)
-            if isinstance(settings, dict) and isinstance(settings.get("enabledPlugins"), dict):
-                enabled_map = settings["enabledPlugins"]
         except (OSError, json.JSONDecodeError):
-            pass
+            continue
+        if not isinstance(settings, dict):
+            continue
+        if isinstance(settings.get("enabledPlugins"), dict):
+            enabled_map.update(settings["enabledPlugins"])  # later (nearer) layer wins
+        register_hooks(cfg, f"settings:{label}", "settings", hooks_from_obj(settings.get("hooks")))
 
     installed_path = cfg.claude_dir / "plugins" / "installed_plugins.json"
     if installed_path.is_file():
@@ -891,6 +1230,7 @@ def discover_claude(cfg: Config, health: Health, scan_errors: list[dict[str, str
                             item = skill_item_from_file(skill_md, source_type="plugin", cfg=cfg)
                             if item:
                                 items.append(item)
+                add_plugin_extras(cfg, items, pname, install_path, manifest, with_hooks=True)
     return items
 
 
@@ -975,6 +1315,7 @@ def discover_codex(cfg: Config, health: Health, scan_errors: list[dict[str, str]
                     item = skill_item_from_file(skill_md, source_type="plugin", cfg=cfg)
                     if item:
                         items.append(item)
+        add_plugin_extras(cfg, items, pname, install_path, manifest, with_hooks=False)
     return items
 
 
@@ -984,7 +1325,19 @@ def discover_project(cfg: Config, health: Health, scan_errors: list[dict[str, st
         roots.append(display_path(root, cfg.home, absolute=cfg.show_absolute))
         items.extend(walk_skill_dir(root, label, cfg, health, scan_errors))
     cur = cfg.cwd.resolve()
+    try:
+        user_claude = cfg.claude_dir.resolve()
+    except OSError:
+        user_claude = cfg.claude_dir
     while True:
+        for kind, sub in (("command", "commands"), ("agent", "agents")):
+            d = cur / ".claude" / sub
+            try:
+                if d.is_dir() and d.resolve().parent != user_claude:
+                    for name, desc, f in markdown_entries(d):
+                        items.append(md_item(kind, name, desc, f, source_type="project", cfg=cfg))
+            except OSError:
+                continue
         mcp = cur / ".mcp.json"
         if mcp.is_file():
             roots.append(display_path(mcp, cfg.home, absolute=cfg.show_absolute))
@@ -1036,11 +1389,13 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
         "external_commands": [],
         "network_endpoints": [],
         "shell_install": False,
+        "risky_actions": [],
         "adjacent_inspection": "not_inspected",
         "skipped_files": 0,
         "truncated": False,
     }
     bundled: list[dict[str, Any]] = []
+    pkg_text = ""
     raw_text = text or ""
     resolved_kind = kind
     candidate_path = path
@@ -1052,6 +1407,7 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
             resolved_kind = detect_kind(path)
         if path.is_dir():
             pkg = inspect_package(path)
+            pkg_text = pkg.pop("text", "")
             adjacent.update(pkg)
             if resolved_kind == "plugin":
                 manifest = load_plugin_manifest(path)
@@ -1077,18 +1433,21 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
                                 "name": parsed["keys"].get("name") or child.name,
                                 "description": parsed["keys"].get("description") or "",
                             })
-                mcp_file = path / ".mcp.json" if (path / ".mcp.json").is_file() else path / "mcp.json"
-                if mcp_file.is_file():
-                    try:
-                        servers = _mcp_servers_from_obj(load_json(mcp_file))
-                    except (OSError, json.JSONDecodeError):
-                        servers = {}
-                    for sname, entry in servers.items():
-                        bundled.append({
-                            "kind": "mcp",
-                            "name": sname,
-                            "description": str(entry.get("command") or entry.get("url") or ""),
-                        })
+                for kind_b, sub in (("command", "commands"), ("agent", "agents")):
+                    for bname, bdesc, _f in markdown_entries(path / sub):
+                        bundled.append({"kind": kind_b, "name": f"{name}:{bname}", "description": bdesc})
+                for sname, entry in plugin_mcp_servers(path, manifest).items():
+                    bundled.append({
+                        "kind": "mcp",
+                        "name": sname,
+                        "description": str(entry.get("command") or entry.get("url") or ""),
+                    })
+                cand_hooks = plugin_hooks(path, manifest)
+                scan_text = raw_text + "\n" + pkg_text
+                adjacent["external_commands"] = uniq_cap(referenced_commands(scan_text))
+                adjacent["network_endpoints"] = uniq_cap(referenced_urls(scan_text))
+                adjacent["shell_install"] = shell_install(scan_text)
+                adjacent["risky_actions"] = inspect_risky(scan_text)
                 compat = {"status": "works", "findings": []}
                 return {
                     "kind": "plugin",
@@ -1099,7 +1458,8 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
                     "provenance": adjacent,
                     "compatibility": compat,
                     "bundled": bundled,
-                    "suspicious_patterns": inspect_suspicious(raw_text + " " + description),
+                    "hooks": cand_hooks,
+                    "suspicious_patterns": inspect_suspicious(scan_text),
                     "parse_error": None,
                 }
             if resolved_kind == "mcp":
@@ -1125,10 +1485,12 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
     if resolved_kind == "auto":
         resolved_kind = detect_kind(candidate_path, raw_text)
 
-    adjacent["external_commands"] = referenced_commands(raw_text)
-    adjacent["network_endpoints"] = referenced_urls(raw_text)
-    adjacent["shell_install"] = shell_install(raw_text)
-    suspicious = inspect_suspicious(raw_text)
+    scan_text = raw_text + ("\n" + pkg_text if pkg_text else "")
+    adjacent["external_commands"] = uniq_cap(referenced_commands(scan_text))
+    adjacent["network_endpoints"] = uniq_cap(referenced_urls(scan_text))
+    adjacent["shell_install"] = shell_install(scan_text)
+    adjacent["risky_actions"] = inspect_risky(scan_text)
+    suspicious = inspect_suspicious(scan_text)
 
     if resolved_kind == "mcp":
         try:
@@ -1157,6 +1519,7 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
             "provenance": adjacent,
             "compatibility": compat,
             "bundled": [],
+            "hooks": {},
             "suspicious_patterns": suspicious,
             "parse_error": None,
         }
@@ -1184,6 +1547,7 @@ def load_candidate(cfg: Config, path: Path | None, text: str | None, kind: str) 
         "provenance": adjacent,
         "compatibility": compat,
         "bundled": bundled,
+        "hooks": {},
         "suspicious_patterns": suspicious,
         "parse_error": parsed["error"],
     }
@@ -1307,6 +1671,40 @@ def live_catalogs() -> tuple[list[dict[str, Any]], list[str], list[str]]:
 # Report
 # ---------------------------------------------------------------------------
 
+def probe_version(binary: str) -> str | None:
+    """Best-effort `<binary> --version` for the user's own harness CLI (never a candidate)."""
+    if os.environ.get("INSTALLORNOT_NO_VERSION_PROBE"):
+        return None
+    exe = shutil.which(binary)
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=3, stdin=subprocess.DEVNULL
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"\d+\.\d+\.\d+", (proc.stdout or "") + (proc.stderr or ""))
+    return m.group(0) if m else None
+
+
+def hook_overlap(candidate: dict[str, Any], registry: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Events the candidate hooks that installed plugins/settings already hook. Several hooks
+    on one event can fire together, which is how two 'memory' plugins double-inject context."""
+    out: list[dict[str, Any]] = []
+    own = (candidate.get("name") or "").casefold()
+    for event, cmds in sorted((candidate.get("hooks") or {}).items()):
+        others = [h for h in registry if h["event"] == event and h["owner"].casefold() != own]
+        if others:
+            out.append({
+                "event": event,
+                "candidate_commands": cmds,
+                "installed_owners": sorted({h["owner"] for h in others}),
+                "installed_count": len(others),
+            })
+    return out
+
+
 def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str | None) -> dict[str, Any]:
     health = Health()
     scan_errors: list[dict[str, str]] = []
@@ -1317,6 +1715,7 @@ def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str |
     inventory: list[dict[str, Any]] = []
     inventory.extend(discover_claude(cfg, health, scan_errors, roots))
     inventory.extend(discover_codex(cfg, health, scan_errors, roots))
+    inventory.extend(discover_agents_dir(cfg, health, scan_errors, roots))
     inventory.extend(discover_project(cfg, health, scan_errors, roots))
     inventory = dedupe_inventory(inventory)
 
@@ -1358,7 +1757,9 @@ def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str |
         catalog_hits = hits
         catalog_meta["truncated"] = hit_meta["truncated"]
 
-    eligible = [s for s in sl if s.get("match_reason") == "exact_name"]
+    # Any shortlisted entry can end up with an action-bearing verdict, so any of them may need
+    # a body read. Rank order already puts exact-name matches first.
+    eligible = list(sl)
     deep = {
         "eligible_entries": len(eligible),
         "inspected_entries": min(len(eligible), DEEP_INSPECT_CAP),
@@ -1371,19 +1772,33 @@ def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str |
         "truncated": len(inventory) > SEMANTIC_SKIM_BUDGET,
     }
 
+    platforms = []
+    warnings: list[str] = []
+    for pname_, binary in (("claude", "claude"), ("codex", "codex")):
+        ver = probe_version(binary)
+        platforms.append({
+            "name": pname_,
+            "version": ver or "unknown",
+            "adapter_status": "supported" if ver else "unknown",
+        })
+        if not ver:
+            warnings.append(
+                f"{pname_} version unknown: discovery rules may not match this install, "
+                "so coverage can be incomplete."
+            )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "installornot_version": INSTALLORNOT_VERSION,
         "compatibility_rules_date": COMPATIBILITY_RULES_DATE,
-        "platforms": [
-            {"name": "claude", "version": "unknown", "adapter_status": "supported"},
-            {"name": "codex", "version": "unknown", "adapter_status": "supported"},
-        ],
+        "platforms": platforms,
+        "warnings": warnings,
         "resolved_roots": roots,
         "candidate": candidate,
         "active_inventory": inventory,
         "shortlist": sl,
         "shortlist_metadata": sl_meta,
+        "hook_overlap": hook_overlap(candidate, cfg.hooks),
         "catalog_hits": catalog_hits,
         "catalog_metadata": catalog_meta,
         "inventory_health": health.as_dict(),

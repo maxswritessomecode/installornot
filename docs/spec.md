@@ -419,3 +419,13 @@ Added for installornot:
 27. Catalog JSON containing “ignore previous instructions” cannot change schema or omit inventory.
 28. Disabled Claude plugin (`enabledPlugins: false`) is absent from active inventory.
 29. Tests use isolated temp config roots and never read or write the developer’s real `~/.claude` / `~/.codex`.
+30. `~/.claude.json` user and per-project `mcpServers` appear in the inventory; nothing else in that file (tokens, env values) reaches the output.
+31. Plugin-bundled MCP servers, commands and agents are inventoried (commands/agents namespaced `plugin:name`).
+32. `hook_overlap` lists events the candidate shares with installed plugins and `settings.json` hooks, with owners.
+33. Plugin and directory candidates have bundled bodies, hooks and scripts scanned (bounded, static); `risky_actions` and suspicious patterns reflect that text, not only the manifest.
+34. Same-job wording the trigger table misses is caught by `similar_text`; an unrelated skill is not.
+35. Identical copies under several roots are one entry with several sources; same name with different content stays separate.
+36. Project `settings*.json` can disable a plugin enabled at user level.
+37. `deep_inspection.eligible_entries` equals the shortlist length; `truncated` is true past the cap of 10.
+38. Unknown platform versions yield `adapter_status: unknown` and a `warnings` entry.
+39. Folded/literal/quoted frontmatter scalars and CRLF parse to plain text.

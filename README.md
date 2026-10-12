@@ -8,6 +8,8 @@ It answers three questions, in this order:
 2. Does it collide with something you already have?
 3. Do you already have something that does the same job?
 
+Besides skills, MCPs and plugins it also compares slash commands, agents and **hooks**: two plugins hooking the same event (say `SessionStart`) both fire, which is how two memory plugins end up injecting context twice. It flags risky actions in the candidate (`git push`, `osascript`, `sudo`, edits to your agent config) and tells the agent to check them against your own CLAUDE.md rules.
+
 It never installs, disables, or deletes anything. Python 3.11. No pip.
 
 ## Check a candidate
@@ -45,6 +47,8 @@ No Node:
 curl -fsSL https://raw.githubusercontent.com/maxswritessomecode/installornot/master/install.sh | bash
 ```
 
+Add `-s -- --claude-only` after `bash` to install only into Claude Code (default also writes `~/.codex` and `~/.agents`).
+
 `--copy` on purpose. Symlinks to a clone that later moves is how you get a skills directory full of dead links.
 
 Then start a new session (or a new turn).
@@ -73,7 +77,7 @@ cp -R skills/installornot "$HOME/.codex/skills/installornot"
 ## Tests
 
 ```bash
-python3 -m unittest tests.test_inventory tests.test_install
+python3 -B -m unittest tests.test_inventory tests.test_install
 ```
 
 Those tests build fake config dirs. They do not read yours.
