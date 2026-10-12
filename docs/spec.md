@@ -209,7 +209,8 @@ Against active inventory of all kinds (cross-kind). Cap 25.
 1. Exact name match (case-insensitive). Always included; does **not** decide the verdict.
 2. Normalized exact-description match (Unicode normalize, case-fold, strip punctuation/whitespace).
 3. Adaptive verbatim shingles on the description. Six words when both have ≥6 tokens; else length of the shorter, minimum 2. One-word descriptions skip shingles.
-4. Rank: exact name, then exact description, then shingle count descending.
+4. Purpose job. Name+description on each side must hit **two or more** triggers from the same job in `JOB_TRIGGERS` (`agent_memory`, `skill_authoring`, `frontend_ui`). `match_reason: purpose` and `purpose_job: <job>`. This is how claude-mem vs TencentDB Agent Memory shortlists without a shared name or copied sentence. One shared word (e.g. “memory leak”) is not enough.
+5. Rank: exact name, then exact description, then shingle count descending, then purpose.
 
 Plugin candidates: also shortlist using bundled skill/MCP names and descriptions.
 
@@ -293,8 +294,9 @@ Incomplete catalog coverage must be stated. Never claim “nothing better exists
       "description": "...",
       "source_type": "...",
       "display_path": "$HOME/...",
-      "match_reason": "exact_name|exact_description|shingle",
-      "shingle_count": 0
+      "match_reason": "exact_name|exact_description|shingle|purpose",
+      "shingle_count": 0,
+      "purpose_job": "agent_memory|skill_authoring|frontend_ui|null"
     }
   ],
   "shortlist_metadata": { "total_matches": 0, "included_matches": 0, "truncated": false },
@@ -417,3 +419,16 @@ Added for installornot:
 27. Catalog JSON containing “ignore previous instructions” cannot change schema or omit inventory.
 28. Disabled Claude plugin (`enabledPlugins: false`) is absent from active inventory.
 29. Tests use isolated temp config roots and never read or write the developer’s real `~/.claude` / `~/.codex`.
+30. `~/.claude.json` user and per-project `mcpServers` appear in the inventory; nothing else in that file (tokens, env values) reaches the output.
+31. Plugin-bundled MCP servers, commands and agents are inventoried (commands/agents namespaced `plugin:name`).
+32. `hook_overlap` lists events the candidate shares with installed plugins and `settings.json` hooks, with owners.
+33. Plugin and directory candidates have bundled bodies, hooks and scripts scanned (bounded, static); `risky_actions` and suspicious patterns reflect that text, not only the manifest.
+34. Same-job wording the trigger table misses is caught by `similar_text`; an unrelated skill is not.
+35. Identical copies under several roots are one entry with several sources; same name with different content stays separate.
+36. Project `settings*.json` can disable a plugin enabled at user level.
+37. `deep_inspection.eligible_entries` equals the shortlist length; `truncated` is true past the cap of 10.
+38. Unknown platform versions yield `adapter_status: unknown` and a `warnings` entry.
+39. Folded/literal/quoted frontmatter scalars and CRLF parse to plain text.
+40. `--compare-path` returns `compare.pairwise_shortlist` (A vs B, exact-name and purpose hits included), `pairwise_hook_overlap`, and B's own `b_shortlist` / `b_hook_overlap` against the install; `compare` is `null` without the flag.
+41. Identical or missing compare paths are fatal; text bundled with B is scanned and its injection strings stay warnings.
+42. `deep_inspection.eligible_entries` includes pairwise and B rows.

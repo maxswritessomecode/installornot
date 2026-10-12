@@ -45,6 +45,30 @@ class TestInstallScript(unittest.TestCase):
         self.assertTrue((self.home / ".agents" / "skills" / "installornot" / "SKILL.md").is_file())
         self.assertNotIn("downloading", proc.stdout)
 
+    def test_claude_only_flag_skips_codex_and_agents(self):
+        proc = subprocess.run(
+            ["bash", str(INSTALL), "--claude-only"],
+            capture_output=True,
+            text=True,
+            env=self._env(),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+        self.assertTrue((self.home / ".claude" / "skills" / "installornot" / "SKILL.md").is_file())
+        self.assertFalse((self.home / ".codex").exists())
+        self.assertFalse((self.home / ".agents").exists())
+
+    def test_unknown_flag_is_rejected(self):
+        proc = subprocess.run(
+            ["bash", str(INSTALL), "--bogus"],
+            capture_output=True,
+            text=True,
+            env=self._env(),
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertFalse((self.home / ".claude").exists())
+
     def test_replaces_dangling_symlink(self):
         dest = self.home / ".claude" / "skills" / "installornot"
         dest.parent.mkdir(parents=True)

@@ -167,4 +167,5 @@ def env_for(home: Path, claude: Path, codex: Path) -> dict[str, str]:
     env["CLAUDE_CONFIG_DIR"] = str(claude)
     env["CODEX_HOME"] = str(codex)
     env.pop("INSTALLORNOT_CLAUDE_CONFIG_DIR", None)
+    env["INSTALLORNOT_NO_VERSION_PROBE"] = "1"
     return env
