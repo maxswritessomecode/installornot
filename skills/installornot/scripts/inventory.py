@@ -1705,7 +1705,55 @@ def hook_overlap(candidate: dict[str, Any], registry: list[dict[str, Any]]) -> l
     return out
 
 
-def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str | None) -> dict[str, Any]:
+def candidate_as_inventory(cand: dict[str, Any], origin: str) -> list[dict[str, Any]]:
+    """Shape a candidate (and what it bundles) like inventory rows so shortlist() can compare
+    another candidate against it."""
+    rows = [{"kind": cand.get("kind"), "name": cand.get("name"), "description": cand.get("description")}]
+    rows.extend(cand.get("bundled") or [])
+    out = []
+    for r in rows:
+        name, desc = r.get("name") or "", r.get("description") or ""
+        out.append({
+            "kind": r.get("kind"),
+            "name": name,
+            "description": desc,
+            "source_type": "candidate_b",
+            "display_path": origin,
+            "content_sha256": sha256_text(f"{name}\n{desc}"),
+            "sources": [origin],
+            "frontmatter_keys": [],
+        })
+    return out
+
+
+def compare_candidates(
+    cfg: Config,
+    a: dict[str, Any],
+    compare_path: Path,
+    inventory: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Candidate B: its own checks against the installed set, plus A against B directly."""
+    b = load_candidate(cfg, compare_path, None, cfg.kind)
+    origin = display_path(compare_path, cfg.home, absolute=cfg.show_absolute)
+    pair_rows, pair_meta = shortlist(a, candidate_as_inventory(b, origin))
+    b_rows, b_meta = shortlist(b, inventory)
+    a_hooks = [
+        {"event": ev, "owner": a.get("name") or "A", "source_type": "candidate_a", "commands": cmds}
+        for ev, cmds in (a.get("hooks") or {}).items()
+    ]
+    # B's hooks against A's: reuse hook_overlap by treating A's hooks as the registry.
+    return {
+        "candidate_b": b,
+        "pairwise_shortlist": pair_rows,
+        "pairwise_metadata": pair_meta,
+        "pairwise_hook_overlap": hook_overlap(b, a_hooks),
+        "b_shortlist": b_rows,
+        "b_shortlist_metadata": b_meta,
+        "b_hook_overlap": hook_overlap(b, cfg.hooks),
+    }
+
+
+def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str | None, compare_path: Path | None = None) -> dict[str, Any]:
     health = Health()
     scan_errors: list[dict[str, str]] = []
     roots: list[str] = []
@@ -1720,6 +1768,12 @@ def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str |
     inventory = dedupe_inventory(inventory)
 
     sl, sl_meta = shortlist(candidate, inventory)
+
+    compare = None
+    if compare_path is not None:
+        if candidate_path is not None and compare_path.resolve() == candidate_path.resolve():
+            raise CandidateError("--compare-path is the same as --candidate-path")
+        compare = compare_candidates(cfg, candidate, compare_path, inventory)
 
     catalog_hits: list[dict[str, Any]] = []
     catalog_meta = {"mode": cfg.catalogs, "sources": [], "truncated": False, "fetch_errors": []}
@@ -1760,6 +1814,8 @@ def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str |
     # Any shortlisted entry can end up with an action-bearing verdict, so any of them may need
     # a body read. Rank order already puts exact-name matches first.
     eligible = list(sl)
+    if compare:
+        eligible += compare["pairwise_shortlist"] + compare["b_shortlist"]
     deep = {
         "eligible_entries": len(eligible),
         "inspected_entries": min(len(eligible), DEEP_INSPECT_CAP),
@@ -1799,6 +1855,7 @@ def build_report(cfg: Config, candidate_path: Path | None, candidate_text: str |
         "shortlist": sl,
         "shortlist_metadata": sl_meta,
         "hook_overlap": hook_overlap(candidate, cfg.hooks),
+        "compare": compare,
         "catalog_hits": catalog_hits,
         "catalog_metadata": catalog_meta,
         "inventory_health": health.as_dict(),
@@ -1813,6 +1870,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--candidate-path", type=str)
     src.add_argument("--candidate-text", type=str)
+    p.add_argument(
+        "--compare-path", type=str, default=None,
+        help="second candidate: also compare it against the first and check it on its own",
+    )
     p.add_argument("--kind", choices=["auto", "skill", "mcp", "plugin"], default="auto")
     p.add_argument("--catalogs", choices=["local", "live", "off"], default="local")
     p.add_argument("--claude-config-dir", type=str, default=None)
@@ -1864,7 +1925,10 @@ def main(argv: list[str] | None = None) -> int:
             print("candidate exceeds maximum size", file=sys.stderr)
             return 2
     try:
-        report = build_report(cfg, path, text)
+        compare = Path(args.compare_path).expanduser() if args.compare_path else None
+        if compare is not None and not compare.exists():
+            raise CandidateError(f"unreadable candidate: {compare}")
+        report = build_report(cfg, path, text, compare)
     except CandidateError as exc:
         print(str(exc), file=sys.stderr)
         return 2

@@ -27,7 +27,13 @@ python3 ~/.claude/skills/installornot/scripts/inventory.py --candidate-path ./mc
 python3 ~/.claude/skills/installornot/scripts/inventory.py --candidate-path ./some-plugin
 ```
 
-Or, in a Claude Code / Codex session, drop the path and ask:
+Two candidates (A vs B, plus each against what you have installed):
+
+```bash
+python3 ~/.claude/skills/installornot/scripts/inventory.py --candidate-path ./plugin-a --compare-path ./plugin-b
+```
+
+Or, in a Claude Code / Codex session, drop the path (or two GitHub URLs) and ask:
 
 > Will this work with what I already have?
 

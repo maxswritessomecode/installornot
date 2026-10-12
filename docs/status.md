@@ -7,10 +7,11 @@
 - Spec at `docs/spec.md`.
 - Stdlib scanner at `skills/installornot/scripts/inventory.py`.
 - Agent protocol in `skills/installornot/SKILL.md`.
-- Isolated tests (`python3 -B -m unittest tests.test_inventory tests.test_install`), 58 passing.
+- Isolated tests (`python3 -B -m unittest tests.test_inventory tests.test_install`), 66 passing.
 - Public repo: https://github.com/maxswritessomecode/installornot
 - One-command install: `npx skills add maxswritessomecode/installornot -g --copy -y` or `install.sh` (`--claude-only` available).
 - Claude marketplace manifest at `.claude-plugin/`.
+- 2026-10-11 pairwise compare mode (`--compare-path`) and URL clone guidance.
 - 2026-10-11 review fixes: real MCP files, hook overlap, full-text candidate scan, wider purpose shortlist, settings layering, copy dedupe, version probe. See `docs/decisions.md`.
 
 **Next**

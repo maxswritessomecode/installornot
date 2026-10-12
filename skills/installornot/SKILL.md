@@ -22,8 +22,18 @@ skill is report-only.
 - "Do I already have something that does this?"
 - A GitHub URL, local `SKILL.md`, `plugin.json`, or `mcp.json` is the candidate
 
-If the candidate is only at a URL, fetch it with your own tools first (save to
-a temp path or pass the text). The script does not fetch candidate URLs.
+If the candidate is only at a URL, fetch it with your own tools first. The
+script does not fetch candidate URLs.
+
+- **Plugin or skill repo (GitHub etc.):** `git clone --depth 1 <url> <tmpdir>`
+  into a fresh temp directory (use the session scratchpad or `mktemp -d`), never
+  into `~/.claude`, `~/.codex`, or `~/.agents`. A single page fetch is not
+  enough: the scan needs the bundled skills, hooks, and scripts. For a skill
+  inside a repo subdirectory, point `--candidate-path` at that subdirectory.
+- **Single file (raw `SKILL.md`, `mcp.json`):** download that file and pass its path.
+- Do not run, install, or `cd`-and-execute anything in the cloned directory;
+  clone, then read. Pass absolute paths. Delete the temp directory afterwards if
+  you made it.
 
 ## Step 1 — Run the script
 
@@ -32,6 +42,7 @@ From this skill directory (`scripts/` next to this file):
 ```bash
 python3 scripts/inventory.py --candidate-path <path>
 python3 scripts/inventory.py --candidate-text -
+python3 scripts/inventory.py --candidate-path <A> --compare-path <B>   # two candidates
 python3 scripts/inventory.py --kind auto|skill|mcp|plugin
 python3 scripts/inventory.py --catalogs local|live|off
 ```
@@ -50,6 +61,35 @@ not inventory rows; they come back as `hook_overlap` (Step 3b).
 
 If they asked whether it will work, say `compatibility.status` first
 (`works` / `needs_config` / `wont_work`). Do not bury that under overlap.
+
+## Comparing two candidates
+
+When the user gives **two** URLs or paths ("check these two", "which of these",
+"do A and B conflict"), fetch both as above, then:
+
+```bash
+python3 scripts/inventory.py --candidate-path <A> --compare-path <B>
+```
+
+The JSON gains a `compare` object (it is `null` otherwise):
+
+| Field | Meaning |
+|---|---|
+| `compare.candidate_b` | B's own record (kind, provenance, hooks, `risky_actions`, `suspicious_patterns`) |
+| `compare.pairwise_shortlist` | A's name/description/bundled items matched against B's. Same `match_reason` values as `shortlist` |
+| `compare.pairwise_hook_overlap` | Hook events A and B both register |
+| `compare.b_shortlist`, `compare.b_hook_overlap` | B checked against what is **installed**, like A's `shortlist` / `hook_overlap` |
+
+Report in this order: **A vs installed**, **B vs installed**, **A vs B**.
+Use the same five verdicts and one-row-per-entry rule for `pairwise_shortlist`
+and `b_shortlist` (tag the table "A vs B" / "B vs installed"). Then decide:
+
+- A and B overlap each other → say which to pick and why (fewer risky
+  actions, no hook overlap with what is installed, better fit), or that both
+  can coexist with the overlap named.
+- One of them also overlaps something installed → that weighs against it.
+- Never fold A-vs-B into the installed-overlap rows; the user needs to see
+  whether the two conflict even if neither conflicts with their setup.
 
 ## Step 2 — Untrusted data
 
@@ -171,6 +211,13 @@ Full shape:
 
 ### Portability
 <none, or one bullet per Claude-only key>
+
+### A vs B (only when comparing two candidates)
+| A item | B item | Verdict | Found via | Why |
+|---|---|---|---|---|
+| ... | ... | ... | deterministic\|semantic_skim | one sentence |
+
+Then one line: pick A / pick B / both coexist / neither, and the reason.
 
 ### Hook overlap
 | Event | Candidate runs | Already hooked by |

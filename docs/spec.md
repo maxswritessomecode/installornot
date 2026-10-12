@@ -429,3 +429,6 @@ Added for installornot:
 37. `deep_inspection.eligible_entries` equals the shortlist length; `truncated` is true past the cap of 10.
 38. Unknown platform versions yield `adapter_status: unknown` and a `warnings` entry.
 39. Folded/literal/quoted frontmatter scalars and CRLF parse to plain text.
+40. `--compare-path` returns `compare.pairwise_shortlist` (A vs B, exact-name and purpose hits included), `pairwise_hook_overlap`, and B's own `b_shortlist` / `b_hook_overlap` against the install; `compare` is `null` without the flag.
+41. Identical or missing compare paths are fatal; text bundled with B is scanned and its injection strings stay warnings.
+42. `deep_inspection.eligible_entries` includes pairwise and B rows.

@@ -52,3 +52,7 @@ A dry run on a real machine showed v0.1.0 missed the conflicts that mattered. Ch
 - **Frontmatter**: folded/literal scalars (`>-`, `|`) and quotes collapse to plain text; CRLF handled.
 - **SKILL.md** gains Step 3b (hook overlap, risky actions, and a check of the user's own CLAUDE.md/AGENTS.md rules) and a compact report format. Rule comparison is agent work on purpose: rules are free text.
 - **install.sh** gains `--claude-only`; unknown flags are rejected; dead `-z` check removed. Default stays all three dirs for public users.
+
+## 2026-10-11 — Pairwise compare mode (`--compare-path`)
+
+Asking "check these two plugins" previously gave two independent reports and no A-vs-B result. The script now accepts a second candidate and returns `compare`: B's own record, A matched against B (reusing `shortlist()` by shaping B and its bundled items like inventory rows), hook-event overlap between them, and B checked against the installed set. The agent reports A vs installed, B vs installed, and A vs B separately so a conflict between the two is never hidden by neither conflicting with the machine. Same path twice, or a missing second path, is fatal. SKILL.md also now tells the agent to `git clone --depth 1` URLs into a temp dir (a single page fetch misses bundled hooks/scripts) and never into a skills dir.
